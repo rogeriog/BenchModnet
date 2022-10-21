@@ -13,7 +13,7 @@ def split_df(df,n):
     return [ df[i:i+n] for i in range(0,df.shape[0],n) ]
 
 def import_and_featurize(dataset_name,base_feature, target_feature, featurizers=None, mode='general',
-                        num_samples=-1, progressive_featurization=False, feat_steps=(0,10,10)):
+                        num_samples=-1, progressive_featurization=False, feat_steps=(1,10,10)):
     '''Function to import and featurize dataset, it may start from a pickle file for the dataset and featurize it,
     or just read the featurized dataset if it was already produced. Since featurization is very slow for large datasets, 
     this function implements a progressive mode which splits the featurization in small parts to be assembled in a 

@@ -1,11 +1,57 @@
 
-def import_and_featurize(dataset_name,base_feature, target_feature, target_name=None, num_samples=-1):
+def split_df(df,n):
+    '''Splits a dataframe in a number n of chunks. 
+    Parameters
+    ----------
+    df : pandas Dataframe,
+    n : int, number of chunks to divide Dataframe.
+    Returns
+    ----------
+    list : list of Dataframes,
+        subdivided dataframe that if concatenated produce the original DataFrame.
+    '''
+    return [ df[i:i+n] for i in range(0,df.shape[0],n) ]
+
+def import_and_featurize(dataset_name,base_feature, target_feature, featurizers=None, mode='general',
+                        num_samples=-1, progressive_featurization=False, feat_steps=(0,10,10)):
+    '''Function to import and featurize dataset, it may start from a pickle file for the dataset and featurize it,
+    or just read the featurized dataset if it was already produced. Since featurization is very slow for large datasets, 
+    this function implements a progressive mode which splits the featurization in small parts to be assembled in a 
+    final featurized dataset in the end. 
+
+    Parameters
+    ----------
+    dataset_name: str, 
+        Name of the dataset to be downloaded with matminer or to be loaded from the folder
+    base_feature: str, 
+        Usually it is either 'structure' or 'composition' depending on the dataset.
+    target_feature: str, 
+        The name of the feature to be predicted as presented in the raw dataset.
+    featurizers: list of matminer featurizers, default=None
+        List of matminer featurizers to be applied to the dataset, if mode='MODNet' this variable is disregarded. 
+    mode: str, default='general'
+        Mode of featurizer, by default it should apply matminer featurizers as specified to the dataset. 
+        May also be 'MODNet' to use MODNet default featurization.
+    num_samples: int, default=-1
+        In case it is preferable to work with a subset of the dataset, specify the number of samples to be taken.
+        These rows will be taken at random.
+    progressive_featurization: Boolean, default=False,
+        Activate to make the featurization in steps, in each step a ~_featurized_(feat_step).pkl file will be produced.
+    feat_steps: (start,stop,total_steps), default=(1,10,10) 
+        List to define progressive featurization of the data. 
+
+    Returns
+    -------
+    The function returns the featurized dataframe. It may be as a MODData class or a pandas dataframe depending on the 
+    mode. 
+    '''
     #########################################
     #### IMPORT AND FEATURIZE DATASET
     #########################################
     from matminer.datasets import load_dataset
     from modnet.preprocessing import MODData
     import pickle, os
+    import pandas as pd
     ''' Loads featurized data if available, otherwise tries to load dataset, otherwise download dataset
     and featurize the data if none are already available'''
     ### save or import file of the featurized dataset
@@ -16,9 +62,9 @@ def import_and_featurize(dataset_name,base_feature, target_feature, target_name=
         ### save or import file of the dataset
         if os.path.exists(dataset_name+".pkl") and os.path.getsize(dataset_name+".pkl") > 0:
             with open(dataset_name+".pkl","rb") as file:
-                df = pickle.load(file)
+                df = pickle.load(file) ## loads raw dataset if available in folder
         else:
-            df = load_dataset(dataset_name)
+            df = load_dataset(dataset_name) ## downloads and then saves the raw dataset
             with open(dataset_name+".pkl","wb") as file:
                 pickle.dump(df, file)
 
@@ -29,20 +75,86 @@ def import_and_featurize(dataset_name,base_feature, target_feature, target_name=
         if num_samples != -1 :
             #### just to reduce data to run
             df=df.sample(n=num_samples, random_state=1).reset_index(drop=True)
+        ###########
+        #### MODNET
+        ###########
+        if mode == 'MODNet':
+            if progressive_featurization :
+                start,stop,total_steps = feat_steps
+                df_chunks=split_df(df,total_steps)
+                target_name = target_feature.replace(' ','_')+"_target"
+                for i in range(start-1,stop):
+                    data = MODData(
+                        materials=df_chunks[i][base_feature], 
+                        targets=df_chunks[i][target_feature], 
+                        target_names=[target_name]
+                    )
+                    data.featurize()
+                    with open(f"{dataset_name}_featurized_{str(i+1)}of{str(total_steps)}.pkl","wb") as file:
+                        pickle.dump(data.df_featurized, file)      
+## check if all chunks of dataframe were featurized.
+                for i in range(total_steps):
+                    namechunk=f"{dataset_name}_featurized_{str(i+1)}of{str(total_steps)}.pkl"
+                    if os.path.exists(namechunk) and os.path.getsize(namechunk) > 0 :
+                        df_chunks[i]=pickle.load(namechunk)
+                    else:
+                        raise RuntimeError(f"The file corresponding to chunk {str(i+1)} of {str(total_steps)} is not present for \
+                                the featurized dataset. Featurize the missing data and try again.")
+                ## assemble all featurized chunks in the featurized dataframe.
+                df_featurized=pd.concat(df_chunks, axis=0)
+                ## reinitialize MODData with full dataset and attribute df_featurized
+                data = MODData(
+                        materials=df[base_feature], 
+                        targets=df[target_feature], 
+                        target_names=[target_name]
+                    )
+                data.df_featurized=df_featurized 
+                # save complete featurized MODData
+                with open(f"{dataset_name}_featurized.pkl","wb") as file: 
+                            pickle.dump(data, file)                                           
+            else:
+                target_name = target_feature.replace(' ','_')+"_target"
+                data = MODData(
+                    materials=df[base_feature], 
+                    targets=df[target_feature], 
+                    target_names=[target_name]
+                )
+                data.featurize()
+                with open(dataset_name+"_featurized.pkl","wb") as file:
+                    pickle.dump(data, file)
+                return data         
+        ###########
+        #### GENERAL
+        ###########       
+        if mode == 'general':
+            if progressive_featurization :
+                # name_featurizer=featurizer.__name__
+                start,stop,total_steps = feat_steps
+                df_chunks=split_df(df,total_steps)
+                for featurizer in featurizers: 
+                    ## featurize each chunk of the dataframe
+                    for i in range(start-1,stop):
+                        df_chunks[i]=featurizer.featurize_dataframe(df_chunks[i], target_feature)
+                        with open(f"{dataset_name}_featurized_{str(i+1)}of{str(total_steps)}.pkl","wb") as file:
+                            pickle.dump(df_chunks[i], file)
 
-        if target_name is None:
-            target_name = target_feature.replace(' ','_')+"_target"
-
-        data = MODData(
-            materials=df[base_feature], # you can provide composition objects to MODData
-            targets=df[target_feature], 
-            target_names=[target_name]
-        )
-
-        data.featurize()
-        with open(dataset_name+"_featurized.pkl","wb") as file:
-            pickle.dump(data, file)
-    return data
+                ## check if all chunks of dataframe were featurized.
+                for i in range(total_steps):
+                    namechunk=f"{dataset_name}_featurized_{str(i+1)}of{str(total_steps)}.pkl"
+                    if os.path.exists(namechunk) and os.path.getsize(namechunk) > 0 :
+                        df_chunks[i]=pickle.load(namechunk)
+                    else:
+                        raise RuntimeError(f"The file corresponding to chunk {str(i+1)} of {str(total_steps)} is not present for \
+                                the featurized dataset. Featurize the missing data and try again.")
+                ## assemble all featurized chunks in the featurized dataframe.
+                df=pd.concat(df_chunks, axis=0)
+                # save complete featurized dataframe
+                with open(f"{dataset_name}_featurized.pkl","wb") as file: 
+                            pickle.dump(df, file) 
+            else: # featurize in one go.
+                for featurizer in featurizers: 
+                    df=featurizer.featurize_dataframe(df, target_feature)
+            return df
 
 def generate_matbench_kfold():
     #########################################

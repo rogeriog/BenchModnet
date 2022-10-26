@@ -16,7 +16,7 @@ def split_df(df,n):
 
 def import_and_featurize(dataset_name,base_feature, target_feature, featurizers=None, id='', mode='general',
                         num_samples=-1, progressive_featurization=False, feat_steps=(1,10,10),
-                        model_for_custom_feats=None):
+                        model_for_custom_feats=None, n_jobs=None):
     '''Function to import and featurize dataset, it may start from a pickle file for the dataset and featurize it,
     or just read the featurized dataset if it was already produced. Since featurization is very slow for large datasets, 
     this function implements a progressive mode which splits the featurization in small parts to be assembled in a 
@@ -49,6 +49,8 @@ def import_and_featurize(dataset_name,base_feature, target_feature, featurizers=
     model_for_custom_feats: sklearn.model, default=None
         If using MODNetCustom, in this variable a sklearn.model should be passed to fit the features to the target producing
         a processed feature capturing chemical intuition from more complex features that need to be analysed together.
+    n_jobs: int, default=None
+        Number of jobs.
 
     Returns
     -------
@@ -105,7 +107,7 @@ def import_and_featurize(dataset_name,base_feature, target_feature, featurizers=
                     targets=df_chunks[i][target_feature].reset_index(drop=True),
                     target_names=[target_name]
                 )
-                data.featurize()
+                data.featurize(n_jobs=n_jobs)
                 with open(f"{dataset_name}{id}_featurized_{str(i+1)}of{str(total_steps)}.pkl","wb") as file:
                     pickle.dump(data.df_featurized, file)      
 ## check if all chunks of dataframe were featurized.
@@ -128,7 +130,11 @@ def import_and_featurize(dataset_name,base_feature, target_feature, featurizers=
             data.df_featurized=df_featurized 
             # save complete featurized MODData
             with open(f"{dataset_name}{id}_featurized.pkl","wb") as file: 
-                        pickle.dump(data, file)                                           
+                        pickle.dump(data, file)
+                        start=1 ## reset start to 1
+                        stop=total_steps
+                        #feat_steps = (start,stop,total_steps)
+
         else:
             target_name = target_feature.replace(' ','_')+"_target"
             data = MODData(
@@ -136,7 +142,7 @@ def import_and_featurize(dataset_name,base_feature, target_feature, featurizers=
                 targets=df[target_feature], 
                 target_names=[target_name]
             )
-            data.featurize()
+            data.featurize(n_jobs=n_jobs)
             with open(dataset_name+id+"_featurized.pkl","wb") as file:
                 pickle.dump(data, file)
         return data

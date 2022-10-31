@@ -318,10 +318,16 @@ def NCV_MODNet(data, kf, n_jobs=None, modnet_model=None):
               results['train_neg_mean_absolute_error_scaled'].append(-mean_absolute_error(y, y_predict)/mean_absolute_error(y,mean_vector))
           return results
       X,y=(data.df_featurized,data.df_targets.values) 
+      
+      data.feature_selection(n=-1)
+      import pickle
+      with open("cross_nmi_file.pkl","wb") as f:
+          pickle.dump(data.cross_nmi, f)
+
       for i_split in range(len(list(kf.split(X)))):
           train, test = data.split(list(kf.split(X))[i_split])
           ### feature selection is necessary for fitgenetic.
-          train.feature_selection(n=-1)
+          train.feature_selection(n=-1,cross_nmi=data.cross_nmi)
           print(train.optimal_features)
           ## if modnet model is not specified directly through modnet_model variable, 
           ## it will run genetic algorithm to determine the model, the variable train_each_time
@@ -349,9 +355,7 @@ def NCV_MODNet(data, kf, n_jobs=None, modnet_model=None):
           print('Results KSPLIT: ',results)
           if train_each_time:
               modnet_model = None
-            
-      ### results must be complete now, we can generate the results dictionary
-      return  {"Training R2 scores": results['train_r2'],
+      results_dictionary={"Training R2 scores": results['train_r2'],
               "Mean Training R2": np.array(results['train_r2']).mean(),
               "Training RMS scores": results['train_neg_root_mean_squared_error'],
               "Mean Training RMS": np.array(results['train_neg_root_mean_squared_error']).mean(),
@@ -371,7 +375,11 @@ def NCV_MODNet(data, kf, n_jobs=None, modnet_model=None):
               "Mean Validation Median AE Score": np.array(results['test_neg_median_absolute_error']).mean(),
               "Validation MAE scaled": np.array(results['test_neg_mean_absolute_error_scaled']),
               "Mean validation MAE scaled": np.array(results['test_neg_mean_absolute_error_scaled']).mean(),
-              }
+              }            
+      with open('NCV_results.txt', 'w') as f:
+          f.write('results_dictionary: ' + str(results_dictionary) + '\n')
+      ### results must be complete now, we can generate the results dictionary
+      return results_dictionary
 
 #########################################
 #### NCV TO TRAIN, VALIDATE AND GET SCORES
@@ -445,4 +453,6 @@ def sklearn_CV(model, data, base_feature, target_feature, _kf, n_jobs=1):
               "Validation MAE scaled": np.array(results['test_neg_mean_absolute_error'])/mean_absolute_error(_y,mean_vector),
               "Mean Validation MAE scaled": np.array(np.array(results['test_neg_mean_absolute_error'])/mean_absolute_error(_y,mean_vector)).mean(),  
             }
+      with open('skNCV_results.txt', 'w') as f:
+          f.write('results_dictionary: ' + str(results_dictionary) + '\n')
       return results_dictionary

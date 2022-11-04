@@ -267,7 +267,7 @@ def generate_matbench_kfold():
 #### NCV FUNCTION FOR MODNET
 #########################################
 # K-Fold Cross-Validation with MODNet
-def NCV_MODNet(data, kf, n_jobs=None, modnet_model=None):
+def NCV_MODNet(data, kf, n_jobs=None, modnet_model=None,ga_settings=None):
       '''Function to perform MODNet Cross-Validation
        Parameters
        ----------
@@ -317,9 +317,14 @@ def NCV_MODNet(data, kf, n_jobs=None, modnet_model=None):
               mean_vector.fill(y.mean())
               results['train_neg_mean_absolute_error_scaled'].append(-mean_absolute_error(y, y_predict)/mean_absolute_error(y,mean_vector))
           return results
-      X,y=(data.df_featurized,data.df_targets.values) 
-      
+      X,y=(data.df_featurized,data.df_targets.values)
+      try:
+          with open("cross_nmi_file.pkl","rb") as f:
+              data.cross_nmi=pickle.load(f)
+      except:
+          pass
       data.feature_selection(n=-1)
+
       import pickle
       with open("cross_nmi_file.pkl","wb") as f:
           pickle.dump(data.cross_nmi, f)
@@ -328,13 +333,31 @@ def NCV_MODNet(data, kf, n_jobs=None, modnet_model=None):
           train, test = data.split(list(kf.split(X))[i_split])
           ### feature selection is necessary for fitgenetic.
           train.feature_selection(n=-1,cross_nmi=data.cross_nmi)
+          if ga_settings is None:
+              ga_settings = {
+                            "size_pop": 20,
+                            "num_generations": 10,
+                            "early_stopping": 4,
+                            "refit": False,
+                            "nested": 5,
+                        }
           print(train.optimal_features)
           ## if modnet model is not specified directly through modnet_model variable, 
           ## it will run genetic algorithm to determine the model, the variable train_each_time
           ## is important not to keep the evaluated model in the next splits.
           if modnet_model is None:	
-              ga = FitGenetic(train)
-              modnet_model = ga.run(nested=0, n_jobs=n_jobs) #,fast=True)i
+                ga = FitGenetic(train)
+                model = ga.run(
+                size_pop=ga_settings["size_pop"],
+                num_generations=ga_settings["num_generations"],
+                nested=ga_settings['nested'],
+                n_jobs=n_jobs,
+                early_stopping=ga_settings["early_stopping"],
+                refit=ga_settings["refit"],
+                )
+
+
+              #modnet_model = ga.run(nested=0, n_jobs=n_jobs) #,fast=True)i
               with open("mymodel.pkl","wb") as file:
                  pickle.dump(modnet_model, file)
               train_each_time=True
